@@ -6,7 +6,9 @@
 #include <ituGL/shader/Material.h>
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
+#include <iostream>
 
 ViewerApplication::ViewerApplication()
     : Application(1024, 1024, "Viewer demo")
@@ -51,6 +53,7 @@ void ViewerApplication::Render()
     GetDevice().Clear(true, Color(0.0f, 0.0f, 0.0f, 1.0f), true, 1.0f);
 
     m_model.Draw();
+    RenderGUI();
 }
 
 void ViewerApplication::Cleanup()
@@ -64,8 +67,8 @@ void ViewerApplication::Cleanup()
 void ViewerApplication::InitializeModel()
 {
     // Load and build shader
-    Shader vertexShader = ShaderLoader::Load(Shader::VertexShader, "shaders/unlit.vert");
-    Shader fragmentShader = ShaderLoader::Load(Shader::FragmentShader, "shaders/unlit.frag");
+    Shader vertexShader = ShaderLoader::Load(Shader::VertexShader, "/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/shaders/blinn-phong.vert");
+    Shader fragmentShader = ShaderLoader::Load(Shader::FragmentShader, "/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/shaders/blinn-phong.frag");
     std::shared_ptr<ShaderProgram> shaderProgram = std::make_shared<ShaderProgram>();
     shaderProgram->Build(vertexShader, fragmentShader);
 
@@ -73,21 +76,60 @@ void ViewerApplication::InitializeModel()
     ShaderUniformCollection::NameSet filteredUniforms;
     filteredUniforms.insert("WorldMatrix");
     filteredUniforms.insert("ViewProjMatrix");
+    filteredUniforms.insert("AmbientColor");
+    filteredUniforms.insert("LightColor");
+    filteredUniforms.insert("LightPosition");
+    filteredUniforms.insert("LightIntensity");
+    filteredUniforms.insert("CameraPosition");
+
+    // load textures
+    Texture2DLoader textureLoad(TextureObject::FormatBGRA, TextureObject::InternalFormatRGBA8);
+    textureLoad.SetFlipVertical(true);
+    std::shared_ptr<Texture2DObject> groundColorTexture = textureLoad.LoadShared("/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/models/mill/Ground_color.jpg");
+    std::shared_ptr<Texture2DObject> groundShadowTexture = textureLoad.LoadShared("/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/models/mill/Ground_shadow.jpg");
+    std::shared_ptr<Texture2DObject> millCatTexture = textureLoad.LoadShared("/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/models/mill/MillCat_color.jpg");
+    std::cout <<"format" << TextureObject::FormatBGRA << std::endl;
+
 
     // Create reference material
+    std::vector<std::shared_ptr<Texture2DObject>> textures = {groundShadowTexture, groundColorTexture, millCatTexture};
+
     std::shared_ptr<Material> material = std::make_shared<Material>(shaderProgram, filteredUniforms);
     material->SetUniformValue("Color", glm::vec4(1.0f));
+    material->SetUniformValue("ColorTexture", groundShadowTexture);
+    material->SetUniformValue("AmbientReflection", 1.0f);
+    material->SetUniformValue("DiffuseReflection", 1.0f);
+    material->SetUniformValue("SpecularReflection", m_specularRefl);
+    material->SetUniformValue("SpecularExponent", m_specularExp);
+
+    std::shared_ptr<Material> material1 = std::make_shared<Material>(*material);
+    material1->SetUniformValue("ColorTexture", groundColorTexture);
+
+    std::shared_ptr<Material> material2 = std::make_shared<Material>(*material);
+    material2->SetUniformValue("ColorTexture", millCatTexture);
+
 
     // Setup function
     ShaderProgram::Location worldMatrixLocation = shaderProgram->GetUniformLocation("WorldMatrix");
     ShaderProgram::Location viewProjMatrixLocation = shaderProgram->GetUniformLocation("ViewProjMatrix");
+    ShaderProgram::Location ambientColorLocation = shaderProgram->GetUniformLocation("AmbientColor");
+    ShaderProgram::Location lightColorLocation = shaderProgram->GetUniformLocation("LightColor");
+    ShaderProgram::Location  lightPositionLocation = shaderProgram->GetUniformLocation("LightPosition");
+    ShaderProgram::Location  lightIntensityLocation = shaderProgram->GetUniformLocation("LightIntensity");
+    ShaderProgram::Location  cameraPositionLocation = shaderProgram->GetUniformLocation("CameraPosition");
+    std::cout <<"location: "<< worldMatrixLocation << std::endl;
+
     material->SetShaderSetupFunction([=](ShaderProgram& shaderProgram)
         {
             shaderProgram.SetUniform(worldMatrixLocation, glm::scale(glm::vec3(0.1f)));
             shaderProgram.SetUniform(viewProjMatrixLocation, m_camera.GetViewProjectionMatrix());
 
             // (todo) 05.X: Set camera and light uniforms
-
+            shaderProgram.SetUniform(ambientColorLocation, m_ambientColor);
+            shaderProgram.SetUniform(lightColorLocation, m_lightColor);
+            shaderProgram.SetUniform( lightPositionLocation, m_lightPosition);
+            shaderProgram.SetUniform(lightIntensityLocation, m_lightIntensity);
+            shaderProgram.SetUniform(cameraPositionLocation, m_cameraPosition);
 
         });
 
@@ -98,10 +140,15 @@ void ViewerApplication::InitializeModel()
     loader.SetMaterialAttribute(VertexAttribute::Semantic::TexCoord0, "VertexTexCoord");
 
     // Load model
-    m_model = loader.Load("models/mill/Mill.obj");
+    m_model = loader.Load("/Users/wqy/Desktop/Git/graphics-programming-2023/exercises/exercise05/models/mill/Mill.obj");
 
     // (todo) 05.1: Load and set textures
+    m_model.SetMaterial(0, material);
+    m_model.SetMaterial(1, material1);
+    m_model.SetMaterial(2, material2);
 
+    std::cout << "sub meshes counts: "<< m_model.GetMesh().GetSubmeshCount() << std::endl;
+    std::cout << "sub material counts: "<< m_model.GetMaterialCount() << std::endl;
 }
 
 void ViewerApplication::InitializeCamera()
@@ -125,6 +172,11 @@ void ViewerApplication::RenderGUI()
     m_imGui.BeginFrame();
 
     // (todo) 05.4: Add debug controls for light properties
+    ImGui::DragFloat("Light Intensity",&m_lightIntensity, 0.01, 0.0, 1.0, "%.2f");
+    ImGui::DragFloat("Light Intensity", &m_lightIntensity, 0.01, 0.0, 1.0, "%.2f");
+    ImGui::ColorEdit3("Ambient Color", glm::value_ptr(m_ambientColor));
+    ImGui::DragFloat3("Light Position", glm::value_ptr(m_lightPosition), 0.1);
+    ImGui::ColorEdit3("Light Color", glm::value_ptr(m_lightColor));
 
     m_imGui.EndFrame();
 }
